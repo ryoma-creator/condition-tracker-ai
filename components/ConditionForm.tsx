@@ -138,46 +138,75 @@ export default function ConditionForm({ initial, onSave, saving, showDatePicker 
       )}
 
       <View style={s.divider} /><Text style={s.blockTitle}>睡眠</Text>
-      <TimeStepper label="就寝" value={log.bed_time} onChange={(v) => update('bed_time', v)} />
-      <TimeStepper label="起床" value={log.wake_time} onChange={(v) => update('wake_time', v)} />
-      <View style={s.sleepBadge}>
-        <Text style={s.sleepBadgeTxt}>睡眠時間 <Text style={s.highlight}>{sleepHours}時間</Text></Text>
-      </View>
-      <ScalePicker title="睡眠の質" options={SLEEP_QUALITY} value={log.sleep_quality} onChange={(v) => update('sleep_quality', v)} />
 
-      {/* ストレート睡眠・二度寝 */}
-      <View style={s.toggleRow}>
-        <Text style={s.toggleLbl}>ストレートで寝れた</Text>
-        <Switch
-          value={log.straight_sleep ?? true}
-          onValueChange={(v) => {
-            update('straight_sleep', v);
-            if (v) update('extra_sleep', null); // ストレートに戻したら二度寝リセット
-          }}
-          trackColor={{ true: '#6366f1', false: '#444' }}
-          thumbColor="#fff"
-        />
-      </View>
-      {!(log.straight_sleep ?? true) && (
-        <View style={s.extraSleepCard}>
-          <Text style={s.label}>二度寝した時間帯</Text>
-          <TimeStepper
-            label="二度寝 開始"
-            value={(log.extra_sleep as ExtraSleep | null)?.start_time ?? '06:00'}
-            onChange={(v) => update('extra_sleep', { ...(log.extra_sleep ?? { minutes: 30 }), start_time: v })}
-          />
-          <View style={s.exRow}>
-            <Text style={s.label}>時間</Text>
-            <TouchableOpacity style={s.stepBtn} onPress={() => update('extra_sleep', { ...(log.extra_sleep ?? { start_time: '06:00' }), minutes: Math.max(10, ((log.extra_sleep as ExtraSleep | null)?.minutes ?? 30) - 10) })}><Text style={s.stepTxt}>▼</Text></TouchableOpacity>
-            <Text style={s.minVal}>{(log.extra_sleep as ExtraSleep | null)?.minutes ?? 30}分</Text>
-            <TouchableOpacity style={s.stepBtn} onPress={() => update('extra_sleep', { ...(log.extra_sleep ?? { start_time: '06:00' }), minutes: Math.min(180, ((log.extra_sleep as ExtraSleep | null)?.minutes ?? 30) + 10) })}><Text style={s.stepTxt}>▲</Text></TouchableOpacity>
+      {/* 睡眠1 */}
+      <View style={s.sleepBlock}>
+        <Text style={s.sleepBlockLabel}>睡眠1</Text>
+        <View style={s.sleepRow}>
+          <View style={s.sleepCol}>
+            <TimeStepper label="就寝" value={log.bed_time} onChange={(v) => update('bed_time', v)} />
+          </View>
+          <Text style={s.sleepArrow}>→</Text>
+          <View style={s.sleepCol}>
+            <TimeStepper label="起床" value={log.wake_time} onChange={(v) => update('wake_time', v)} />
           </View>
         </View>
+        <View style={s.sleepBadge}>
+          <Text style={s.sleepBadgeTxt}><Text style={s.highlight}>{sleepHours}時間</Text></Text>
+        </View>
+      </View>
+
+      {/* 睡眠2（二度寝） */}
+      {log.extra_sleep ? (
+        <View style={s.sleepBlock}>
+          <View style={s.sleepBlockHeader}>
+            <Text style={s.sleepBlockLabel}>睡眠2</Text>
+            <TouchableOpacity onPress={() => update('extra_sleep', null)}>
+              <Text style={s.removeTxt}>✕ 削除</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={s.sleepRow}>
+            <View style={s.sleepCol}>
+              <TimeStepper
+                label="就寝"
+                value={(log.extra_sleep as ExtraSleep).start_time}
+                onChange={(v) => update('extra_sleep', { ...(log.extra_sleep as ExtraSleep), start_time: v })}
+              />
+            </View>
+            <Text style={s.sleepArrow}>→</Text>
+            <View style={s.sleepCol}>
+              <TimeStepper
+                label="起床"
+                value={(log.extra_sleep as ExtraSleep).end_time}
+                onChange={(v) => update('extra_sleep', { ...(log.extra_sleep as ExtraSleep), end_time: v })}
+              />
+            </View>
+          </View>
+          <View style={s.sleepBadge}>
+            <Text style={s.sleepBadgeTxt}><Text style={s.highlight}>{calcHours((log.extra_sleep as ExtraSleep).start_time, (log.extra_sleep as ExtraSleep).end_time)}時間</Text></Text>
+          </View>
+        </View>
+      ) : (
+        <TouchableOpacity style={s.addSleepBtn} onPress={() => update('extra_sleep', { start_time: '06:00', end_time: '08:00' })}>
+          <Text style={s.addSleepTxt}>＋ 睡眠を追加（二度寝など）</Text>
+        </TouchableOpacity>
       )}
+
+      <ScalePicker title="睡眠の質" options={SLEEP_QUALITY} value={log.sleep_quality} onChange={(v) => update('sleep_quality', v)} />
 
       <View style={s.divider} /><Text style={s.blockTitle}>コンディション</Text>
       <ScalePicker title="疲労度（右が良い）" options={FATIGUE} value={log.fatigue} onChange={(v) => update('fatigue', v)} />
       <ScalePicker title="集中度" options={FOCUS} value={log.focus} onChange={(v) => update('focus', v)} />
+
+      {/* 学習量 */}
+      <View style={s.section}>
+        <Text style={s.label}>学習量（時間）</Text>
+        <View style={s.exRow}>
+          <TouchableOpacity style={s.stepBtn} onPress={() => update('study_hours', Math.max(0, (log.study_hours ?? 0) - 0.5))}><Text style={s.stepTxt}>▼</Text></TouchableOpacity>
+          <Text style={s.minVal}>{(log.study_hours ?? 0)}h</Text>
+          <TouchableOpacity style={s.stepBtn} onPress={() => update('study_hours', Math.min(12, (log.study_hours ?? 0) + 0.5))}><Text style={s.stepTxt}>▲</Text></TouchableOpacity>
+        </View>
+      </View>
       <View style={s.toggleRow}>
         <Text style={s.toggleLbl}>コールドシャワー</Text>
         <Switch value={log.cold_shower} onValueChange={(v) => update('cold_shower', v)} trackColor={{ true: '#6366f1' }} thumbColor="#fff" />
@@ -223,14 +252,11 @@ export default function ConditionForm({ initial, onSave, saving, showDatePicker 
               <Switch value={ex.outdoor ?? false} onValueChange={(v) => updateExercise(ex.type, 'outdoor', v)} trackColor={{ true: '#6366f1' }} thumbColor="#fff" />
             </View>
           )}
-          <View style={s.exRow}>
-            <Text style={s.label}>時間帯</Text>
-            {(['morning', 'afternoon', 'night'] as const).map((t) => (
-              <TouchableOpacity key={t} style={[s.tag, ex.time_of_day === t && s.active]} onPress={() => updateExercise(ex.type, 'time_of_day', t)}>
-                <Text style={[s.tagTxt, ex.time_of_day === t && s.activeTxt]}>{TIMING_LABELS[t]}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <TimeStepper
+            label="時間帯"
+            value={ex.time_of_day && /^\d{2}:\d{2}$/.test(ex.time_of_day) ? ex.time_of_day : '12:00'}
+            onChange={(v) => updateExercise(ex.type, 'time_of_day', v)}
+          />
         </View>
       ))}
 
@@ -333,7 +359,15 @@ const s = StyleSheet.create({
   suppTiming: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   amountInput: { flex: 1, backgroundColor: '#2a2a2a', color: '#fff', borderRadius: 8, padding: 8, fontSize: 13 },
   dateInput: { marginTop: 10, backgroundColor: '#1a1a1a', color: '#fff', borderRadius: 10, padding: 12, fontSize: 14 },
-  extraSleepCard: { backgroundColor: '#1a1a1a', borderRadius: 12, padding: 16, marginBottom: 16, gap: 8 },
+  sleepBlock: { backgroundColor: '#1a1a1a', borderRadius: 12, padding: 16, marginBottom: 12 },
+  sleepBlockHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  sleepBlockLabel: { color: '#666', fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  sleepRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sleepCol: { flex: 1 },
+  sleepArrow: { color: '#444', fontSize: 18, marginTop: 12 },
+  removeTxt: { color: '#ef4444', fontSize: 12 },
+  addSleepBtn: { borderWidth: 1, borderColor: '#2a2a2a', borderStyle: 'dashed', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 16 },
+  addSleepTxt: { color: '#6366f1', fontSize: 14 },
   divider: { height: 1, backgroundColor: '#1e1e1e', marginVertical: 20 },
   textarea: { backgroundColor: '#1a1a1a', color: '#fff', borderRadius: 12, padding: 16, fontSize: 15, minHeight: 100, textAlignVertical: 'top' },
   saveBtn: { backgroundColor: '#6366f1', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 28 },

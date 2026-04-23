@@ -64,7 +64,7 @@ function EntryCard({ entry, onEdit, onDelete }: { entry: ConditionLog; onEdit: (
   const supLogs = entry.supplement_logs ?? [];
   const avg = (entry.sleep_quality + entry.fatigue + entry.focus) / 3;
   const grade = calcGrade(avg);
-  const extraSleep = entry.extra_sleep as { start_time: string; minutes: number } | null | undefined;
+  const extraSleep = entry.extra_sleep as { start_time: string; end_time?: string; minutes?: number } | null | undefined;
 
   return (
     <View style={s.card}>
@@ -101,7 +101,9 @@ function EntryCard({ entry, onEdit, onDelete }: { entry: ConditionLog; onEdit: (
             {entry.straight_sleep === false ? <Text style={s.brokenTag}> ✗直</Text> : null}
           </Text>
           {extraSleep && (
-            <Text style={s.extraSleepLine}>↩ 二度寝 {extraSleep.start_time}〜 {extraSleep.minutes}分</Text>
+            <Text style={s.extraSleepLine}>
+              ↩ 睡眠2 {extraSleep.start_time}〜{extraSleep.end_time ?? `${extraSleep.minutes}分`}
+            </Text>
           )}
           <View style={s.statsRow}>
             <StatChip label="質" val={entry.sleep_quality} />
@@ -132,32 +134,48 @@ function EntryCard({ entry, onEdit, onDelete }: { entry: ConditionLog; onEdit: (
   );
 }
 
+const isColumnError = (msg: string) =>
+  msg.includes('column') || msg.includes('does not exist') || msg.includes('42703');
+
 function EditModal({ entry, onClose, onSaved }: { entry: ConditionLog; onClose: () => void; onSaved: () => void }) {
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const handleSave = async (log: ConditionLog, sleepHours: number) => {
     setSaving(true);
-    const { error } = await supabase.from('condition_logs').update({
-      date: log.date,
-      bed_time: log.bed_time,
-      wake_time: log.wake_time,
-      sleep_hours: sleepHours,
-      sleep_quality: log.sleep_quality,
-      fatigue: log.fatigue,
-      focus: log.focus,
-      cold_shower: log.cold_shower,
-      exercise_logs: log.exercise_logs ?? [],
-      meals: log.meals ?? {},
+    setSaveError(null);
+
+    const full = {
+      date: log.date, bed_time: log.bed_time, wake_time: log.wake_time,
+      sleep_hours: sleepHours, sleep_quality: log.sleep_quality,
+      fatigue: log.fatigue, focus: log.focus, cold_shower: log.cold_shower,
+      exercise_logs: log.exercise_logs ?? [], meals: log.meals ?? {},
       supplement_logs: log.supplement_logs ?? [],
-      straight_sleep: log.straight_sleep ?? true,
-      extra_sleep: log.extra_sleep ?? null,
-      sunlight: log.sunlight ?? false,
-      sunlight_minutes: log.sunlight_minutes ?? 0,
+      straight_sleep: log.straight_sleep ?? true, extra_sleep: log.extra_sleep ?? null,
+      sunlight: log.sunlight ?? false, sunlight_minutes: log.sunlight_minutes ?? 0,
       memo: log.memo ?? '',
-    }).eq('id', entry.id as string);
-    if (error) Alert.alert('エラー', error.message);
-    else { onSaved(); onClose(); }
+    };
+    const base = {
+      date: log.date, bed_time: log.bed_time, wake_time: log.wake_time,
+      sleep_hours: sleepHours, sleep_quality: log.sleep_quality,
+      fatigue: log.fatigue, focus: log.focus, cold_shower: log.cold_shower,
+      exercise_logs: log.exercise_logs ?? [], meals: log.meals ?? {},
+      memo: log.memo ?? '',
+    };
+
+    let { error } = await supabase.from('condition_logs').update(full).eq('id', entry.id as string);
+    // カラム不足ならベースだけで再試行
+    if (error && isColumnError(error.message)) {
+      ({ error } = await supabase.from('condition_logs').update(base).eq('id', entry.id as string));
+    }
+
     setSaving(false);
+    if (error) {
+      setSaveError(error.message);
+    } else {
+      onSaved();
+      onClose();
+    }
   };
 
   return (
@@ -165,8 +183,15 @@ function EditModal({ entry, onClose, onSaved }: { entry: ConditionLog; onClose: 
       <View style={s.modalContainer}>
         <View style={s.modalHeader}>
           <Text style={s.modalTitle}>{entry.date} を編集</Text>
-          <TouchableOpacity onPress={onClose}><Text style={s.closeBtn}>✕</Text></TouchableOpacity>
+          <TouchableOpacity onPress={onClose} hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}>
+            <Text style={s.closeBtn}>✕</Text>
+          </TouchableOpacity>
         </View>
+        {saveError && (
+          <View style={s.modalError}>
+            <Text style={s.modalErrorText}>❌ {saveError}</Text>
+          </View>
+        )}
         <ConditionForm initial={entry} onSave={handleSave} saving={saving} showDatePicker />
       </View>
     </Modal>
@@ -257,5 +282,7 @@ const s = StyleSheet.create({
   modalContainer: { flex: 1, backgroundColor: '#0f0f0f' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingBottom: 8 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
-  closeBtn: { color: '#666', fontSize: 20 },
+  closeBtn: { color: '#aaa', fontSize: 24, fontWeight: 'bold', paddingHorizontal: 4 },
+  modalError: { marginHorizontal: 20, marginBottom: 8, backgroundColor: '#2a0a0a', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#ef4444' },
+  modalErrorText: { color: '#ef4444', fontSize: 13 },
 });

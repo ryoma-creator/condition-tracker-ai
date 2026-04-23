@@ -24,7 +24,7 @@ export type NapLog = {
 
 export type ExtraSleep = {
   start_time: string;
-  minutes: number;
+  end_time: string;
 };
 
 export type ConditionLog = {
@@ -47,6 +47,7 @@ export type ConditionLog = {
   extra_sleep?: ExtraSleep | null;
   sunlight?: boolean;
   sunlight_minutes?: number;
+  study_hours?: number;
   memo: string;
 };
 

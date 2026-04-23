@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { DEFAULT_LOG, type ConditionLog } from '../../lib/types';
 import ConditionForm from '../../components/ConditionForm';
@@ -42,6 +42,8 @@ export default function TodayScreen() {
   const [initialLog, setInitialLog] = useState<Partial<ConditionLog>>(DEFAULT_LOG());
   const [mode, setMode] = useState<Mode>('new');
   const [existingId, setExistingId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     supabase.from('condition_logs').select('id').order('created_at', { ascending: false }).limit(1)
@@ -117,9 +119,17 @@ export default function TodayScreen() {
     }
 
     const error = await doSave(log, sleepHours, user.id, targetId);
-    if (error) Alert.alert('保存エラー', error.message);
-    else if (mode === 'new' && !targetId) Alert.alert('記録した ✓');
-    else if (targetId) Alert.alert('上書き保存した ✓');
+    if (error) {
+      setSaveError(error.message);
+    } else {
+      setSaveError(null);
+      setSaved(true);
+      // フォームをリセット
+      setFormKey((k) => k + 1);
+      setInitialLog(DEFAULT_LOG());
+      setMode('new');
+      setExistingId(null);
+    }
 
     setSaving(false);
   };
@@ -133,7 +143,20 @@ export default function TodayScreen() {
         </TouchableOpacity>
       </View>
 
-      {mode === 'edit' && (
+      {saved && !saveError && (
+        <View style={s.successBanner}>
+          <Text style={s.successText}>✓ 保存しました　→ 「記録」タブで確認できます</Text>
+        </View>
+      )}
+
+      {saveError && (
+        <View style={s.errorBanner}>
+          <Text style={s.errorText}>❌ 保存エラー: {saveError}</Text>
+          <Text style={s.errorHint}>Supabaseで以下のSQLを実行してください↓{'\n'}alter table condition_logs add column if not exists supplement_logs jsonb default '[]', add column if not exists straight_sleep boolean default true, add column if not exists extra_sleep jsonb default null, add column if not exists sunlight boolean default false, add column if not exists sunlight_minutes int default 0;</Text>
+        </View>
+      )}
+
+      {mode === 'edit' && !saveError && (
         <View style={s.editBanner}>
           <Text style={s.editBannerText}>✏️ この日付の記録が既にあります（上書き保存）</Text>
         </View>
@@ -163,6 +186,11 @@ const s = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingTop: 16, paddingBottom: 8 },
   title: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
   logout: { fontSize: 13, color: '#444' },
+  successBanner: { marginHorizontal: 24, marginBottom: 8, backgroundColor: '#0a2a0a', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#4ade80' },
+  successText: { color: '#4ade80', fontSize: 13, textAlign: 'center' },
+  errorBanner: { marginHorizontal: 24, marginBottom: 8, backgroundColor: '#2a0a0a', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#ef4444' },
+  errorText: { color: '#ef4444', fontSize: 13, fontWeight: '700', marginBottom: 6 },
+  errorHint: { color: '#888', fontSize: 10, lineHeight: 16 },
   editBanner: { marginHorizontal: 24, marginBottom: 8, backgroundColor: '#1e1a2e', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#a78bfa' },
   editBannerText: { color: '#a78bfa', fontSize: 13, textAlign: 'center' },
   inheritBtn: { marginHorizontal: 24, marginBottom: 8, backgroundColor: '#1a1a2e', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#6366f1' },
