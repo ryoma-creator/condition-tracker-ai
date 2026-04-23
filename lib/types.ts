@@ -13,7 +13,7 @@ export type Meals = {
 
 export type SupplementLog = {
   name: string;
-  amount?: string;
+  amount?: number;
   timing: 'morning' | 'afternoon' | 'night';
 };
 
@@ -44,7 +44,7 @@ export type ConditionLog = {
   supplement_logs: SupplementLog[];
   nap?: NapLog | null;
   straight_sleep?: boolean;
-  extra_sleep?: ExtraSleep | null;
+  extra_sleep?: ExtraSleep[] | ExtraSleep | null;
   sunlight?: boolean;
   sunlight_minutes?: number;
   study_hours?: number;

@@ -64,7 +64,11 @@ function EntryCard({ entry, onEdit, onDelete }: { entry: ConditionLog; onEdit: (
   const supLogs = entry.supplement_logs ?? [];
   const avg = (entry.sleep_quality + entry.fatigue + entry.focus) / 3;
   const grade = calcGrade(avg);
-  const extraSleep = entry.extra_sleep as { start_time: string; end_time?: string; minutes?: number } | null | undefined;
+  type AnyExtraSleep = { start_time: string; end_time?: string; minutes?: number };
+  const rawExtra = entry.extra_sleep as AnyExtraSleep | AnyExtraSleep[] | null | undefined;
+  const extraSleeps: AnyExtraSleep[] = rawExtra
+    ? (Array.isArray(rawExtra) ? rawExtra : [rawExtra])
+    : [];
 
   return (
     <View style={s.card}>
@@ -100,11 +104,11 @@ function EntryCard({ entry, onEdit, onDelete }: { entry: ConditionLog; onEdit: (
             😴 {entry.bed_time} → {entry.wake_time}（{entry.sleep_hours}h）
             {entry.straight_sleep === false ? <Text style={s.brokenTag}> ✗直</Text> : null}
           </Text>
-          {extraSleep && (
-            <Text style={s.extraSleepLine}>
-              ↩ 睡眠2 {extraSleep.start_time}〜{extraSleep.end_time ?? `${extraSleep.minutes}分`}
+          {extraSleeps.map((es, i) => (
+            <Text key={i} style={s.extraSleepLine}>
+              ↩ 睡眠{i + 2} {es.start_time}〜{es.end_time ?? `+${es.minutes}分`}
             </Text>
-          )}
+          ))}
           <View style={s.statsRow}>
             <StatChip label="質" val={entry.sleep_quality} />
             <StatChip label="疲労" val={entry.fatigue} />

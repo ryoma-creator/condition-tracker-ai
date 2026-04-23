@@ -17,7 +17,7 @@ const FOCUS: ScaleOption[] = [
   { value: 4, label: '良い' }, { value: 5, label: 'ゾーン' },
 ];
 const EXERCISE_TYPES = ['筋トレ', 'ウォーキング', 'ランニング', 'ストレッチ', 'その他'];
-const SUPPLEMENT_LIST = ['プロテイン', 'マグネシウム', 'SleepWell', 'ビタミンD', 'クレアチン'];
+const SUPPLEMENT_LIST = ['プロテイン', 'マグネシウム', 'SleepWell', 'ビタミンD', 'クレアチン', 'Brain Speed', 'スーパーマルチビタミンミネラル'];
 const MEAL_KEYS = ['breakfast', 'lunch', 'dinner'] as const;
 const MEAL_LABELS = { breakfast: '朝食', lunch: '昼食', dinner: '夕食' };
 const TIMING_LABELS = { morning: '朝', afternoon: '昼', night: '夜' };
@@ -96,12 +96,40 @@ export default function ConditionForm({ initial, onSave, saving, showDatePicker 
     update('exercise_logs', log.exercise_logs.map((l) => l.type === type ? { ...l, [field]: val } : l));
   };
 
+  const extraSleeps: ExtraSleep[] = Array.isArray(log.extra_sleep)
+    ? log.extra_sleep
+    : log.extra_sleep ? [log.extra_sleep as ExtraSleep] : [];
+
+  const addSleep = () => {
+    const prevWake = extraSleeps.length > 0
+      ? extraSleeps[extraSleeps.length - 1].end_time
+      : log.wake_time;
+    update('extra_sleep', [...extraSleeps, { start_time: prevWake, end_time: prevWake }]);
+  };
+
+  const removeSleep = (idx: number) => {
+    const next = extraSleeps.filter((_, i) => i !== idx);
+    update('extra_sleep', next.length > 0 ? next : null);
+  };
+
+  const updateSleep = (idx: number, field: keyof ExtraSleep, val: string) => {
+    update('extra_sleep', extraSleeps.map((s, i) => i === idx ? { ...s, [field]: val } : s));
+  };
+
   const toggleSupplement = (name: string, timing: SupplementLog['timing']) => {
     const exists = log.supplement_logs.find((s) => s.name === name && s.timing === timing);
     update('supplement_logs', exists
       ? log.supplement_logs.filter((s) => !(s.name === name && s.timing === timing))
-      : [...log.supplement_logs, { name, timing, amount: '' }]
+      : [...log.supplement_logs, { name, timing, amount: 1 }]
     );
+  };
+
+  const updateSupplementAmount = (name: string, timing: SupplementLog['timing'], delta: number) => {
+    update('supplement_logs', log.supplement_logs.map((s) =>
+      s.name === name && s.timing === timing
+        ? { ...s, amount: Math.max(1, Math.min(10, (s.amount ?? 1) + delta)) }
+        : s
+    ));
   };
 
   return (
@@ -156,41 +184,32 @@ export default function ConditionForm({ initial, onSave, saving, showDatePicker 
         </View>
       </View>
 
-      {/* 睡眠2（二度寝） */}
-      {log.extra_sleep ? (
-        <View style={s.sleepBlock}>
+      {/* 追加の睡眠ブロック */}
+      {extraSleeps.map((sl, idx) => (
+        <View key={idx} style={s.sleepBlock}>
           <View style={s.sleepBlockHeader}>
-            <Text style={s.sleepBlockLabel}>睡眠2</Text>
-            <TouchableOpacity onPress={() => update('extra_sleep', null)}>
+            <Text style={s.sleepBlockLabel}>睡眠{idx + 2}</Text>
+            <TouchableOpacity onPress={() => removeSleep(idx)}>
               <Text style={s.removeTxt}>✕ 削除</Text>
             </TouchableOpacity>
           </View>
           <View style={s.sleepRow}>
             <View style={s.sleepCol}>
-              <TimeStepper
-                label="就寝"
-                value={(log.extra_sleep as ExtraSleep).start_time}
-                onChange={(v) => update('extra_sleep', { ...(log.extra_sleep as ExtraSleep), start_time: v })}
-              />
+              <TimeStepper label="就寝" value={sl.start_time} onChange={(v) => updateSleep(idx, 'start_time', v)} />
             </View>
             <Text style={s.sleepArrow}>→</Text>
             <View style={s.sleepCol}>
-              <TimeStepper
-                label="起床"
-                value={(log.extra_sleep as ExtraSleep).end_time}
-                onChange={(v) => update('extra_sleep', { ...(log.extra_sleep as ExtraSleep), end_time: v })}
-              />
+              <TimeStepper label="起床" value={sl.end_time} onChange={(v) => updateSleep(idx, 'end_time', v)} />
             </View>
           </View>
           <View style={s.sleepBadge}>
-            <Text style={s.sleepBadgeTxt}><Text style={s.highlight}>{calcHours((log.extra_sleep as ExtraSleep).start_time, (log.extra_sleep as ExtraSleep).end_time)}時間</Text></Text>
+            <Text style={s.sleepBadgeTxt}><Text style={s.highlight}>{calcHours(sl.start_time, sl.end_time)}時間</Text></Text>
           </View>
         </View>
-      ) : (
-        <TouchableOpacity style={s.addSleepBtn} onPress={() => update('extra_sleep', { start_time: '06:00', end_time: '08:00' })}>
-          <Text style={s.addSleepTxt}>＋ 睡眠を追加（二度寝など）</Text>
-        </TouchableOpacity>
-      )}
+      ))}
+      <TouchableOpacity style={s.addSleepBtn} onPress={addSleep}>
+        <Text style={s.addSleepTxt}>＋ 睡眠を追加</Text>
+      </TouchableOpacity>
 
       <ScalePicker title="睡眠の質" options={SLEEP_QUALITY} value={log.sleep_quality} onChange={(v) => update('sleep_quality', v)} />
 
@@ -287,14 +306,15 @@ export default function ConditionForm({ initial, onSave, saving, showDatePicker 
                     <Text style={[s.tagTxt, entry && s.activeTxt]}>{TIMING_LABELS[timing]}</Text>
                   </TouchableOpacity>
                   {entry && (
-                    <TextInput
-                      style={s.amountInput}
-                      value={entry.amount ?? ''}
-                      onChangeText={(v) => update('supplement_logs', log.supplement_logs.map((sl) => sl.name === name && sl.timing === timing ? { ...sl, amount: v } : sl))}
-                      placeholder="mg/g"
-                      placeholderTextColor="#333"
-                      keyboardType="numeric"
-                    />
+                    <View style={s.amountStepper}>
+                      <TouchableOpacity style={s.amountBtn} onPress={() => updateSupplementAmount(name, timing, -1)}>
+                        <Text style={s.stepTxt}>▼</Text>
+                      </TouchableOpacity>
+                      <Text style={s.amountVal}>{entry.amount ?? 1}</Text>
+                      <TouchableOpacity style={s.amountBtn} onPress={() => updateSupplementAmount(name, timing, 1)}>
+                        <Text style={s.stepTxt}>▲</Text>
+                      </TouchableOpacity>
+                    </View>
                   )}
                 </View>
               );
@@ -357,7 +377,9 @@ const s = StyleSheet.create({
   suppName: { color: '#ccc', fontSize: 14, fontWeight: '600', marginBottom: 10 },
   suppRow: { gap: 8 },
   suppTiming: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  amountInput: { flex: 1, backgroundColor: '#2a2a2a', color: '#fff', borderRadius: 8, padding: 8, fontSize: 13 },
+  amountStepper: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#2a2a2a', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  amountBtn: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  amountVal: { color: '#fff', fontSize: 14, fontWeight: 'bold', minWidth: 20, textAlign: 'center' },
   dateInput: { marginTop: 10, backgroundColor: '#1a1a1a', color: '#fff', borderRadius: 10, padding: 12, fontSize: 14 },
   sleepBlock: { backgroundColor: '#1a1a1a', borderRadius: 12, padding: 16, marginBottom: 12 },
   sleepBlockHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
