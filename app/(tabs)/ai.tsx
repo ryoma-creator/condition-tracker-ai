@@ -116,24 +116,41 @@ function AnalysisTab() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzed, setAnalyzed] = useState(false);
+  const [step, setStep] = useState('');
+  const [elapsed, setElapsed] = useState(0);
 
   const runAnalysis = async () => {
     setLoading(true);
-    const context = await fetchContext(30);
+    setElapsed(0);
 
-    if (!context) {
-      setAnalysis({ alerts: [], summary: '記録が少なすぎます。数日記録を続けると分析できます。' });
-      setLoading(false);
-      setAnalyzed(true);
-      return;
-    }
+    const timer = setInterval(() => setElapsed((s) => s + 1), 1000);
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: `あなたはコンディション分析の専門家。以下のデータからパターンと危険な傾向を分析してください。
+    // 60秒でタイムアウト
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000);
+
+    try {
+      setStep('過去30日のデータを取得中...');
+      const context = await fetchContext(30);
+
+      if (!context) {
+        setAnalysis({ alerts: [], summary: '記録が少なすぎます。数日記録を続けると分析できます。' });
+        setAnalyzed(true);
+        return;
+      }
+
+      const recordCount = context.split('\n').length;
+      setStep(`${recordCount}件のデータをAIに送信中...`);
+      await new Promise((r) => setTimeout(r, 300));
+
+      setStep('AIが分析中... (通常15〜30秒)');
+
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `あなたはコンディション分析の専門家。以下のデータからパターンと危険な傾向を分析してください。
 
 データ：
 ${context}
@@ -155,22 +172,35 @@ warning: 注意が必要な傾向
 good: 良い習慣・改善されている点
 
 アラートは最大5個。データから読み取れる具体的な相関関係を示すこと。`,
-        },
-      ],
-    });
+          },
+        ],
+        // @ts-expect-error signal はSDKの型定義にないが fetch レベルで有効
+        signal: controller.signal,
+      });
 
-    try {
+      setStep('結果を整形中...');
       const content = response.choices[0].message.content ?? '{}';
-      // JSONブロックがあれば抽出
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content) as Analysis;
       setAnalysis(parsed);
-    } catch {
-      setAnalysis({ alerts: [], summary: '分析に失敗しました。再度お試しください。' });
-    }
+      setAnalyzed(true);
 
-    setLoading(false);
-    setAnalyzed(true);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '不明なエラー';
+      const isTimeout = msg.includes('abort') || msg.includes('AbortError');
+      setAnalysis({
+        alerts: [],
+        summary: isTimeout
+          ? 'タイムアウト（60秒）しました。ネット接続を確認して再試行してください。'
+          : `エラー: ${msg}`,
+      });
+      setAnalyzed(true);
+    } finally {
+      clearInterval(timer);
+      clearTimeout(timeout);
+      setLoading(false);
+      setStep('');
+    }
   };
 
   return (
@@ -183,6 +213,13 @@ good: 良い習慣・改善されている点
           ? <ActivityIndicator color="#fff" />
           : <Text style={styles.analyzeBtnText}>{analyzed ? '再分析する' : '分析する'}</Text>}
       </TouchableOpacity>
+
+      {loading && (
+        <View style={styles.stepBox}>
+          <Text style={styles.stepText}>{step}</Text>
+          <Text style={styles.elapsedText}>{elapsed}秒経過</Text>
+        </View>
+      )}
 
       {analysis && (
         <View style={styles.analysisResult}>
@@ -327,6 +364,9 @@ export default function AIScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f0f0f' },
   tabBar: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#1e1e1e' },
+  stepBox: { backgroundColor: '#1a1a2e', borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#2d2d4e', alignItems: 'center', gap: 6 },
+  stepText: { color: '#a5b4fc', fontSize: 14, textAlign: 'center' },
+  elapsedText: { color: '#555', fontSize: 12 },
   tabBtn: { flex: 1, paddingVertical: 14, alignItems: 'center' },
   tabBtnActive: { borderBottomWidth: 2, borderBottomColor: '#6366f1' },
   tabBtnText: { color: '#555', fontSize: 14 },
