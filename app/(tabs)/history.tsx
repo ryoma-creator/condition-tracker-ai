@@ -3,8 +3,9 @@ import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity
 import { supabase } from '../../lib/supabase';
 import { type ConditionLog } from '../../lib/types';
 import ConditionForm from '../../components/ConditionForm';
+import { useLanguage } from '../../contexts/LanguageContext';
+import { BackgroundView } from '../../components/BackgroundView';
 
-// S=赤橙 A=橙黄 B=黄 C=緑 D=青（パワプロ式）
 type ConditionGrade = { face: string; label: string; bg: string; text: string; filter: string };
 
 const GRADES: ConditionGrade[] = [
@@ -23,7 +24,6 @@ function calcGrade(avg: number): ConditionGrade {
   return GRADES[4];
 }
 
-// 個別ステータス値（1〜5）のグレードと色
 function statGrade(val: number): { label: string; color: string } {
   if (val >= 5) return { label: 'S', color: '#f87171' };
   if (val >= 4) return { label: 'A', color: '#fb923c' };
@@ -58,6 +58,7 @@ function StatChip({ label, val }: { label: string; val: number }) {
 }
 
 function EntryCard({ entry, onEdit, onDelete }: { entry: ConditionLog; onEdit: () => void; onDelete: () => void }) {
+  const { t, locale } = useLanguage();
   const [confirmDel, setConfirmDel] = useState(false);
   const exLogs = entry.exercise_logs ?? [];
   const meals = entry.meals ?? {};
@@ -70,33 +71,35 @@ function EntryCard({ entry, onEdit, onDelete }: { entry: ConditionLog; onEdit: (
     ? (Array.isArray(rawExtra) ? rawExtra : [rawExtra])
     : [];
 
+  const timingLabel = (timing: string) =>
+    timing === 'morning' ? t.timing[0] : timing === 'afternoon' ? t.timing[1] : t.timing[2];
+
   return (
     <View style={s.card}>
       <View style={s.cardHeader}>
         <Text style={s.cardDate}>{entry.date}</Text>
         <View style={s.cardActions}>
           <TouchableOpacity style={s.editBtn} onPress={onEdit}>
-            <Text style={s.editBtnTxt}>編集</Text>
+            <Text style={s.editBtnTxt}>{t.edit}</Text>
           </TouchableOpacity>
           {confirmDel ? (
             <View style={s.confirmRow}>
-              <Text style={s.confirmText}>本当に削除？</Text>
+              <Text style={s.confirmText}>{t.reallyDelete}</Text>
               <TouchableOpacity style={s.confirmYesBtn} onPress={onDelete}>
-                <Text style={s.confirmYesTxt}>削除</Text>
+                <Text style={s.confirmYesTxt}>{t.delete}</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setConfirmDel(false)}>
-                <Text style={s.confirmNo}>やめる</Text>
+                <Text style={s.confirmNo}>{t.cancel2}</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <TouchableOpacity style={s.deleteBtn} onPress={() => setConfirmDel(true)}>
-              <Text style={s.deleteBtnTxt}>削除</Text>
+              <Text style={s.deleteBtnTxt}>{t.delete}</Text>
             </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* コンディションバッジ＋スタッツ */}
       <View style={s.condRow}>
         <GradeFace grade={grade} />
         <View style={s.condStats}>
@@ -106,13 +109,13 @@ function EntryCard({ entry, onEdit, onDelete }: { entry: ConditionLog; onEdit: (
           </Text>
           {extraSleeps.map((es, i) => (
             <Text key={i} style={s.extraSleepLine}>
-              ↩ 睡眠{i + 2} {es.start_time}〜{es.end_time ?? `+${es.minutes}分`}
+              ↩ {t.sleepTitle}{i + 2} {es.start_time}〜{es.end_time ?? `+${es.minutes}分`}
             </Text>
           ))}
           <View style={s.statsRow}>
-            <StatChip label="質" val={entry.sleep_quality} />
-            <StatChip label="疲労" val={entry.fatigue} />
-            <StatChip label="集中" val={entry.focus} />
+            <StatChip label={locale === 'ja' ? '質' : 'Slp'} val={entry.sleep_quality} />
+            <StatChip label={locale === 'ja' ? '疲' : 'Fat'} val={entry.fatigue} />
+            <StatChip label={locale === 'ja' ? '集' : 'Foc'} val={entry.focus} />
             {entry.cold_shower && <Text style={s.cold}>🚿</Text>}
           </View>
         </View>
@@ -120,17 +123,17 @@ function EntryCard({ entry, onEdit, onDelete }: { entry: ConditionLog; onEdit: (
 
       {exLogs.length > 0 && (
         <Text style={s.detail}>💪 {exLogs.map((l) => {
-          const t = l.time_of_day === 'morning' ? '朝' : l.time_of_day === 'afternoon' ? '昼' : l.time_of_day === 'night' ? '夜' : '';
-          return `${l.type}${l.minutes}分${l.outdoor ? '(外)' : ''}${t ? `[${t}]` : ''}`;
+          const tod = timingLabel(l.time_of_day ?? '');
+          return `${l.type}${l.minutes}分${l.outdoor ? '(外)' : ''}${tod ? `[${tod}]` : ''}`;
         }).join(' / ')}</Text>
       )}
 
       {(meals.breakfast || meals.lunch || meals.dinner) && (
-        <Text style={s.detail}>🍽 朝:{meals.breakfast ?? '-'} 昼:{meals.lunch ?? '-'} 夜:{meals.dinner ?? '-'}</Text>
+        <Text style={s.detail}>🍽 {t.breakfast}:{meals.breakfast ?? '-'} {t.lunch}:{meals.lunch ?? '-'} {t.dinner}:{meals.dinner ?? '-'}</Text>
       )}
 
       {supLogs.length > 0 && (
-        <Text style={s.detail}>💊 {supLogs.map((sl) => `${sl.name}${sl.amount ? `(${sl.amount})` : ''}/${sl.timing === 'morning' ? '朝' : sl.timing === 'afternoon' ? '昼' : '夜'}`).join(' ')}</Text>
+        <Text style={s.detail}>💊 {supLogs.map((sl) => `${sl.name}${sl.amount ? `(${sl.amount})` : ''}/${timingLabel(sl.timing)}`).join(' ')}</Text>
       )}
 
       {entry.memo ? <Text style={s.memo}>{entry.memo}</Text> : null}
@@ -138,10 +141,8 @@ function EntryCard({ entry, onEdit, onDelete }: { entry: ConditionLog; onEdit: (
   );
 }
 
-const isColumnError = (msg: string) =>
-  msg.includes('column') || msg.includes('does not exist') || msg.includes('42703');
-
 function EditModal({ entry, onClose, onSaved }: { entry: ConditionLog; onClose: () => void; onSaved: () => void }) {
+  const { t } = useLanguage();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -149,44 +150,29 @@ function EditModal({ entry, onClose, onSaved }: { entry: ConditionLog; onClose: 
     setSaving(true);
     setSaveError(null);
 
-    const full = {
+    const { error } = await supabase.from('condition_logs').update({
       date: log.date, bed_time: log.bed_time, wake_time: log.wake_time,
       sleep_hours: sleepHours, sleep_quality: log.sleep_quality,
-      fatigue: log.fatigue, focus: log.focus, cold_shower: log.cold_shower,
+      fatigue: log.fatigue, focus: log.focus, mood: log.mood ?? 3,
+      cold_shower: log.cold_shower,
       exercise_logs: log.exercise_logs ?? [], meals: log.meals ?? {},
       supplement_logs: log.supplement_logs ?? [],
       straight_sleep: log.straight_sleep ?? true, extra_sleep: log.extra_sleep ?? null,
       sunlight: log.sunlight ?? false, sunlight_minutes: log.sunlight_minutes ?? 0,
+      study_hours: log.study_hours ?? 0,
       memo: log.memo ?? '',
-    };
-    const base = {
-      date: log.date, bed_time: log.bed_time, wake_time: log.wake_time,
-      sleep_hours: sleepHours, sleep_quality: log.sleep_quality,
-      fatigue: log.fatigue, focus: log.focus, cold_shower: log.cold_shower,
-      exercise_logs: log.exercise_logs ?? [], meals: log.meals ?? {},
-      memo: log.memo ?? '',
-    };
-
-    let { error } = await supabase.from('condition_logs').update(full).eq('id', entry.id as string);
-    // カラム不足ならベースだけで再試行
-    if (error && isColumnError(error.message)) {
-      ({ error } = await supabase.from('condition_logs').update(base).eq('id', entry.id as string));
-    }
+    }).eq('id', entry.id as string);
 
     setSaving(false);
-    if (error) {
-      setSaveError(error.message);
-    } else {
-      onSaved();
-      onClose();
-    }
+    if (error) { setSaveError(error.message); }
+    else { onSaved(); onClose(); }
   };
 
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet">
       <View style={s.modalContainer}>
         <View style={s.modalHeader}>
-          <Text style={s.modalTitle}>{entry.date} を編集</Text>
+          <Text style={s.modalTitle}>{entry.date}</Text>
           <TouchableOpacity onPress={onClose} hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}>
             <Text style={s.closeBtn}>✕</Text>
           </TouchableOpacity>
@@ -203,6 +189,7 @@ function EditModal({ entry, onClose, onSaved }: { entry: ConditionLog; onClose: 
 }
 
 export default function HistoryScreen() {
+  const { t } = useLanguage();
   const [entries, setEntries] = useState<ConditionLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [editTarget, setEditTarget] = useState<ConditionLog | null>(null);
@@ -218,17 +205,17 @@ export default function HistoryScreen() {
 
   const doDelete = async (entry: ConditionLog) => {
     const { error } = await supabase.from('condition_logs').delete().eq('id', entry.id as string);
-    if (error) Alert.alert('削除エラー', error.message);
+    if (error) Alert.alert(t.deleteError, error.message);
     else loadEntries();
   };
 
   if (loading) return <ActivityIndicator style={{ flex: 1, backgroundColor: '#0f0f0f' }} color="#6366f1" />;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0f0f0f' }}>
+    <BackgroundView style={{ flex: 1, backgroundColor: '#0f0f0f' }}>
       <ScrollView contentContainerStyle={s.content}>
-        <Text style={s.title}>記録一覧</Text>
-        {entries.length === 0 && <Text style={s.empty}>まだ記録がありません</Text>}
+        <Text style={s.title}>{t.historyTitle}</Text>
+        {entries.length === 0 && <Text style={s.empty}>{t.noRecords}</Text>}
         {entries.map((e) => (
           <EntryCard
             key={e.id}
@@ -246,7 +233,7 @@ export default function HistoryScreen() {
           onSaved={() => { loadEntries(); setEditTarget(null); }}
         />
       )}
-    </View>
+    </BackgroundView>
   );
 }
 
