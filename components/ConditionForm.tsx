@@ -1,26 +1,16 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Switch, TextInput } from 'react-native';
 import { type ConditionLog, type ExerciseLog, type Meals, type SupplementLog, type ExtraSleep, DEFAULT_LOG } from '../lib/types';
+import { useLanguage } from '../contexts/LanguageContext';
+import { supabase } from '../lib/supabase';
 
 type ScaleOption = { value: number; label: string };
 
-const SLEEP_QUALITY: ScaleOption[] = [
-  { value: 1, label: '最悪' }, { value: 2, label: '浅い' }, { value: 3, label: '普通' },
-  { value: 4, label: '良い' }, { value: 5, label: '爆睡' },
-];
-const FATIGUE: ScaleOption[] = [
-  { value: 1, label: '限界' }, { value: 2, label: '重い' }, { value: 3, label: '普通' },
-  { value: 4, label: '少し' }, { value: 5, label: 'ゼロ' },
-];
-const FOCUS: ScaleOption[] = [
-  { value: 1, label: '無理' }, { value: 2, label: '散漫' }, { value: 3, label: '普通' },
-  { value: 4, label: '良い' }, { value: 5, label: 'ゾーン' },
-];
-const EXERCISE_TYPES = ['筋トレ', 'ウォーキング', 'ランニング', 'ストレッチ', 'その他'];
-const SUPPLEMENT_LIST = ['プロテイン', 'マグネシウム', 'SleepWell', 'ビタミンD', 'クレアチン', 'Brain Speed', 'スーパーマルチビタミンミネラル'];
+// 運動タイプ・サプリの内部識別子（DB保存値）は日本語で固定
+const EXERCISE_TYPES_JA = ['筋トレ', 'ウォーキング', 'ランニング', 'ストレッチ', 'その他'];
+const SUPPLEMENT_LIST_JA = ['プロテイン', 'マグネシウム', 'SleepWell', 'ビタミンD', 'クレアチン', 'Brain Speed', 'スーパーマルチビタミンミネラル'];
 const MEAL_KEYS = ['breakfast', 'lunch', 'dinner'] as const;
-const MEAL_LABELS = { breakfast: '朝食', lunch: '昼食', dinner: '夕食' };
-const TIMING_LABELS = { morning: '朝', afternoon: '昼', night: '夜' };
+const TIMING_KEYS = ['morning', 'afternoon', 'night'] as const;
 type MealKey = typeof MEAL_KEYS[number];
 
 function ScalePicker({ title, options, value, onChange }: { title: string; options: ScaleOption[]; value: number; onChange: (v: number) => void }) {
@@ -78,11 +68,70 @@ type Props = {
 };
 
 export default function ConditionForm({ initial, onSave, saving, showDatePicker = true, onDateChange }: Props) {
+  const { t, locale } = useLanguage();
   const base = { ...DEFAULT_LOG(), ...initial };
   const [log, setLog] = useState<ConditionLog>(base);
+  const [customSupplements, setCustomSupplements] = useState<string[]>([]);
+  const [newSuppName, setNewSuppName] = useState('');
+  const [addingSupplement, setAddingSupplement] = useState(false);
 
   const sleepHours = useMemo(() => calcHours(log.bed_time, log.wake_time), [log.bed_time, log.wake_time]);
   const update = (key: keyof ConditionLog, val: unknown) => setLog((prev) => ({ ...prev, [key]: val }));
+
+  // カスタムサプリをSupabaseから読み込む
+  const loadCustomSupplements = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase
+      .from('user_settings')
+      .select('custom_supplements')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (data?.custom_supplements) {
+      setCustomSupplements(data.custom_supplements);
+    }
+  }, []);
+
+  useEffect(() => { loadCustomSupplements(); }, [loadCustomSupplements]);
+
+  const saveCustomSupplements = async (list: string[]) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('user_settings').upsert(
+      { user_id: user.id, custom_supplements: list, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
+  };
+
+  const handleAddSupplement = async () => {
+    const name = newSuppName.trim();
+    if (!name || customSupplements.includes(name) || SUPPLEMENT_LIST_JA.includes(name)) return;
+    setAddingSupplement(true);
+    const next = [...customSupplements, name];
+    setCustomSupplements(next);
+    await saveCustomSupplements(next);
+    setNewSuppName('');
+    setAddingSupplement(false);
+  };
+
+  const handleRemoveCustomSupplement = async (name: string) => {
+    const next = customSupplements.filter((s) => s !== name);
+    setCustomSupplements(next);
+    // そのサプリのログも削除
+    update('supplement_logs', log.supplement_logs.filter((s) => s.name !== name));
+    await saveCustomSupplements(next);
+  };
+
+  const allSupplements = [...SUPPLEMENT_LIST_JA, ...customSupplements];
+
+  const SLEEP_QUALITY: ScaleOption[] = (t.sq as readonly string[]).map((label, i) => ({ value: i + 1, label }));
+  const FATIGUE: ScaleOption[] = (t.fatigue as readonly string[]).map((label, i) => ({ value: i + 1, label }));
+  const FOCUS: ScaleOption[] = (t.focus as readonly string[]).map((label, i) => ({ value: i + 1, label }));
+  const MOOD: ScaleOption[] = (t.mood as readonly string[]).map((label, i) => ({ value: i + 1, label }));
+
+  const mealLabels: Record<MealKey, string> = {
+    breakfast: t.breakfast, lunch: t.lunch, dinner: t.dinner,
+  };
 
   const toggleExercise = (type: string) => {
     const exists = log.exercise_logs.find((l) => l.type === type);
@@ -113,7 +162,7 @@ export default function ConditionForm({ initial, onSave, saving, showDatePicker 
   };
 
   const updateSleep = (idx: number, field: keyof ExtraSleep, val: string) => {
-    update('extra_sleep', extraSleeps.map((s, i) => i === idx ? { ...s, [field]: val } : s));
+    update('extra_sleep', extraSleeps.map((sl, i) => i === idx ? { ...sl, [field]: val } : sl));
   };
 
   const toggleSupplement = (name: string, timing: SupplementLog['timing']) => {
@@ -132,16 +181,18 @@ export default function ConditionForm({ initial, onSave, saving, showDatePicker 
     ));
   };
 
+  const sleepLabel = (n: number) => locale === 'ja' ? `${t.sleepTitle} ${n}` : `Sleep ${n}`;
+
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
       {showDatePicker && (
         <View style={s.section}>
-          <Text style={s.label}>いつの記録？</Text>
+          <Text style={s.label}>{t.whenLabel}</Text>
           <View style={s.row}>
             {[0, 1, 2].map((n) => {
               const d = new Date(); d.setDate(d.getDate() - n);
-              const str = d.toISOString().split('T')[0];
-              const label = n === 0 ? '今日' : n === 1 ? '昨日' : '2日前';
+              const str = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+              const label = n === 0 ? t.today : n === 1 ? t.yesterday : t.twoDaysAgo;
               const displayDate = `${d.getMonth() + 1}/${d.getDate()}`;
               return (
                 <TouchableOpacity key={str} style={[s.scaleBtn, log.date === str && s.active]} onPress={() => { update('date', str); onDateChange?.(str); }}>
@@ -158,29 +209,29 @@ export default function ConditionForm({ initial, onSave, saving, showDatePicker 
               update('date', v);
               if (/^\d{4}-\d{2}-\d{2}$/.test(v)) onDateChange?.(v);
             }}
-            placeholder="YYYY-MM-DD（例: 2026-04-22）"
+            placeholder="YYYY-MM-DD"
             placeholderTextColor="#333"
             keyboardType="numbers-and-punctuation"
           />
         </View>
       )}
 
-      <View style={s.divider} /><Text style={s.blockTitle}>睡眠</Text>
+      <View style={s.divider} /><Text style={s.blockTitle}>{t.sleepTitle}</Text>
 
       {/* 睡眠1 */}
       <View style={s.sleepBlock}>
-        <Text style={s.sleepBlockLabel}>睡眠1</Text>
+        <Text style={s.sleepBlockLabel}>{sleepLabel(1)}</Text>
         <View style={s.sleepRow}>
           <View style={s.sleepCol}>
-            <TimeStepper label="就寝" value={log.bed_time} onChange={(v) => update('bed_time', v)} />
+            <TimeStepper label={t.bedTime} value={log.bed_time} onChange={(v) => update('bed_time', v)} />
           </View>
           <Text style={s.sleepArrow}>→</Text>
           <View style={s.sleepCol}>
-            <TimeStepper label="起床" value={log.wake_time} onChange={(v) => update('wake_time', v)} />
+            <TimeStepper label={t.wakeTime} value={log.wake_time} onChange={(v) => update('wake_time', v)} />
           </View>
         </View>
         <View style={s.sleepBadge}>
-          <Text style={s.sleepBadgeTxt}><Text style={s.highlight}>{sleepHours}時間</Text></Text>
+          <Text style={s.sleepBadgeTxt}><Text style={s.highlight}>{sleepHours}h</Text></Text>
         </View>
       </View>
 
@@ -188,38 +239,39 @@ export default function ConditionForm({ initial, onSave, saving, showDatePicker 
       {extraSleeps.map((sl, idx) => (
         <View key={idx} style={s.sleepBlock}>
           <View style={s.sleepBlockHeader}>
-            <Text style={s.sleepBlockLabel}>睡眠{idx + 2}</Text>
+            <Text style={s.sleepBlockLabel}>{sleepLabel(idx + 2)}</Text>
             <TouchableOpacity onPress={() => removeSleep(idx)}>
-              <Text style={s.removeTxt}>✕ 削除</Text>
+              <Text style={s.removeTxt}>{t.removeSleep}</Text>
             </TouchableOpacity>
           </View>
           <View style={s.sleepRow}>
             <View style={s.sleepCol}>
-              <TimeStepper label="就寝" value={sl.start_time} onChange={(v) => updateSleep(idx, 'start_time', v)} />
+              <TimeStepper label={t.bedTime} value={sl.start_time} onChange={(v) => updateSleep(idx, 'start_time', v)} />
             </View>
             <Text style={s.sleepArrow}>→</Text>
             <View style={s.sleepCol}>
-              <TimeStepper label="起床" value={sl.end_time} onChange={(v) => updateSleep(idx, 'end_time', v)} />
+              <TimeStepper label={t.wakeTime} value={sl.end_time} onChange={(v) => updateSleep(idx, 'end_time', v)} />
             </View>
           </View>
           <View style={s.sleepBadge}>
-            <Text style={s.sleepBadgeTxt}><Text style={s.highlight}>{calcHours(sl.start_time, sl.end_time)}時間</Text></Text>
+            <Text style={s.sleepBadgeTxt}><Text style={s.highlight}>{calcHours(sl.start_time, sl.end_time)}h</Text></Text>
           </View>
         </View>
       ))}
       <TouchableOpacity style={s.addSleepBtn} onPress={addSleep}>
-        <Text style={s.addSleepTxt}>＋ 睡眠を追加</Text>
+        <Text style={s.addSleepTxt}>{t.addSleep}</Text>
       </TouchableOpacity>
 
-      <ScalePicker title="睡眠の質" options={SLEEP_QUALITY} value={log.sleep_quality} onChange={(v) => update('sleep_quality', v)} />
+      <ScalePicker title={t.sleepQuality} options={SLEEP_QUALITY} value={log.sleep_quality} onChange={(v) => update('sleep_quality', v)} />
 
-      <View style={s.divider} /><Text style={s.blockTitle}>コンディション</Text>
-      <ScalePicker title="疲労度（右が良い）" options={FATIGUE} value={log.fatigue} onChange={(v) => update('fatigue', v)} />
-      <ScalePicker title="集中度" options={FOCUS} value={log.focus} onChange={(v) => update('focus', v)} />
+      <View style={s.divider} /><Text style={s.blockTitle}>{t.condTitle}</Text>
+      <ScalePicker title={t.fatigueLabel} options={FATIGUE} value={log.fatigue} onChange={(v) => update('fatigue', v)} />
+      <ScalePicker title={t.focusLabel} options={FOCUS} value={log.focus} onChange={(v) => update('focus', v)} />
+      <ScalePicker title={t.moodLabel} options={MOOD} value={log.mood ?? 3} onChange={(v) => update('mood', v)} />
 
       {/* 学習量 */}
       <View style={s.section}>
-        <Text style={s.label}>学習量（時間）</Text>
+        <Text style={s.label}>{t.studyLabel}</Text>
         <View style={s.exRow}>
           <TouchableOpacity style={s.stepBtn} onPress={() => update('study_hours', Math.max(0, (log.study_hours ?? 0) - 0.5))}><Text style={s.stepTxt}>▼</Text></TouchableOpacity>
           <Text style={s.minVal}>{(log.study_hours ?? 0)}h</Text>
@@ -227,116 +279,161 @@ export default function ConditionForm({ initial, onSave, saving, showDatePicker 
         </View>
       </View>
       <View style={s.toggleRow}>
-        <Text style={s.toggleLbl}>コールドシャワー</Text>
+        <Text style={s.toggleLbl}>{t.coldShower}</Text>
         <Switch value={log.cold_shower} onValueChange={(v) => update('cold_shower', v)} trackColor={{ true: '#6366f1' }} thumbColor="#fff" />
       </View>
 
-      <View style={s.divider} /><Text style={s.blockTitle}>食事</Text>
+      <View style={s.divider} /><Text style={s.blockTitle}>{t.mealTitle}</Text>
       {MEAL_KEYS.map((key) => (
         <View key={key} style={s.section}>
-          <Text style={s.label}>{MEAL_LABELS[key]}</Text>
+          <Text style={s.label}>{mealLabels[key]}</Text>
           <TextInput
             style={s.input}
             value={(log.meals as Meals)[key] ?? ''}
             onChangeText={(v) => update('meals', { ...log.meals, [key]: v })}
-            placeholder="例: 自炊・鶏胸肉 / コンビニ / 外食"
+            placeholder={t.mealPlaceholder}
             placeholderTextColor="#333"
           />
         </View>
       ))}
 
-      <View style={s.divider} /><Text style={s.blockTitle}>運動</Text>
+      <View style={s.divider} /><Text style={s.blockTitle}>{t.exerciseTitle}</Text>
       <View style={s.tagRow}>
-        {EXERCISE_TYPES.map((type) => {
+        {EXERCISE_TYPES_JA.map((type, i) => {
           const sel = log.exercise_logs.find((l) => l.type === type);
+          const displayName = (t.exerciseTypes as readonly string[])[i] ?? type;
           return (
             <TouchableOpacity key={type} style={[s.tag, sel && s.active]} onPress={() => toggleExercise(type)}>
-              <Text style={[s.tagTxt, sel && s.activeTxt]}>{type}</Text>
+              <Text style={[s.tagTxt, sel && s.activeTxt]}>{displayName}</Text>
             </TouchableOpacity>
           );
         })}
       </View>
       {log.exercise_logs.map((ex) => (
         <View key={ex.type} style={s.exCard}>
-          <Text style={s.exType}>{ex.type}</Text>
+          <Text style={s.exType}>{(t.exerciseTypes as readonly string[])[EXERCISE_TYPES_JA.indexOf(ex.type)] ?? ex.type}</Text>
           <View style={s.exRow}>
-            <Text style={s.label}>時間</Text>
+            <Text style={s.label}>{t.duration}</Text>
             <TouchableOpacity style={s.stepBtn} onPress={() => updateExercise(ex.type, 'minutes', Math.max(10, ex.minutes - 10))}><Text style={s.stepTxt}>▼</Text></TouchableOpacity>
             <Text style={s.minVal}>{ex.minutes}分</Text>
             <TouchableOpacity style={s.stepBtn} onPress={() => updateExercise(ex.type, 'minutes', Math.min(180, ex.minutes + 10))}><Text style={s.stepTxt}>▲</Text></TouchableOpacity>
           </View>
           {(ex.type === 'ウォーキング' || ex.type === 'ランニング') && (
-            <View style={s.toggleRow}>
-              <Text style={s.label}>屋外（日光あり）</Text>
-              <Switch value={ex.outdoor ?? false} onValueChange={(v) => updateExercise(ex.type, 'outdoor', v)} trackColor={{ true: '#6366f1' }} thumbColor="#fff" />
-            </View>
+            <>
+              <View style={s.toggleRow}>
+                <Text style={s.label}>{t.outdoor}</Text>
+                <Switch value={ex.outdoor ?? false} onValueChange={(v) => updateExercise(ex.type, 'outdoor', v)} trackColor={{ true: '#6366f1' }} thumbColor="#fff" />
+              </View>
+              <View style={s.sleepRow}>
+                <View style={s.sleepCol}>
+                  <TimeStepper label={t.bedTime} value={ex.start_time && /^\d{2}:\d{2}$/.test(ex.start_time) ? ex.start_time : '07:00'} onChange={(v) => updateExercise(ex.type, 'start_time', v)} />
+                </View>
+                <Text style={s.sleepArrow}>→</Text>
+                <View style={s.sleepCol}>
+                  <TimeStepper label={t.wakeTime} value={ex.end_time && /^\d{2}:\d{2}$/.test(ex.end_time) ? ex.end_time : '08:00'} onChange={(v) => updateExercise(ex.type, 'end_time', v)} />
+                </View>
+              </View>
+            </>
           )}
-          <TimeStepper
-            label="時間帯"
-            value={ex.time_of_day && /^\d{2}:\d{2}$/.test(ex.time_of_day) ? ex.time_of_day : '12:00'}
-            onChange={(v) => updateExercise(ex.type, 'time_of_day', v)}
-          />
+          {ex.type !== 'ウォーキング' && ex.type !== 'ランニング' && (
+            <TimeStepper
+              label={t.timeOfDay}
+              value={ex.time_of_day && /^\d{2}:\d{2}$/.test(ex.time_of_day) ? ex.time_of_day : '12:00'}
+              onChange={(v) => updateExercise(ex.type, 'time_of_day', v)}
+            />
+          )}
         </View>
       ))}
 
-      <View style={s.divider} /><Text style={s.blockTitle}>日光浴</Text>
+      <View style={s.divider} /><Text style={s.blockTitle}>{t.sunlightTitle}</Text>
       <View style={s.toggleRow}>
-        <Text style={s.toggleLbl}>日光を浴びた</Text>
+        <Text style={s.toggleLbl}>{t.sunlightToggle}</Text>
         <Switch value={log.sunlight ?? false} onValueChange={(v) => update('sunlight', v)} trackColor={{ true: '#f59e0b' }} thumbColor="#fff" />
       </View>
       {log.sunlight && (
         <View style={s.exRow}>
-          <Text style={s.label}>時間</Text>
+          <Text style={s.label}>{t.duration}</Text>
           <TouchableOpacity style={s.stepBtn} onPress={() => update('sunlight_minutes', Math.max(5, (log.sunlight_minutes ?? 10) - 5))}><Text style={s.stepTxt}>▼</Text></TouchableOpacity>
           <Text style={s.minVal}>{log.sunlight_minutes ?? 10}分</Text>
           <TouchableOpacity style={s.stepBtn} onPress={() => update('sunlight_minutes', Math.min(120, (log.sunlight_minutes ?? 10) + 5))}><Text style={s.stepTxt}>▲</Text></TouchableOpacity>
         </View>
       )}
 
-      <View style={s.divider} /><Text style={s.blockTitle}>サプリ・薬</Text>
-      {SUPPLEMENT_LIST.map((name) => (
-        <View key={name} style={s.suppCard}>
-          <Text style={s.suppName}>{name}</Text>
-          <View style={s.suppRow}>
-            {(['morning', 'afternoon', 'night'] as const).map((timing) => {
-              const entry = log.supplement_logs.find((sl) => sl.name === name && sl.timing === timing);
-              return (
-                <View key={timing} style={s.suppTiming}>
-                  <TouchableOpacity style={[s.tag, entry && s.active]} onPress={() => toggleSupplement(name, timing)}>
-                    <Text style={[s.tagTxt, entry && s.activeTxt]}>{TIMING_LABELS[timing]}</Text>
-                  </TouchableOpacity>
-                  {entry && (
-                    <View style={s.amountStepper}>
-                      <TouchableOpacity style={s.amountBtn} onPress={() => updateSupplementAmount(name, timing, -1)}>
-                        <Text style={s.stepTxt}>▼</Text>
-                      </TouchableOpacity>
-                      <Text style={s.amountVal}>{entry.amount ?? 1}</Text>
-                      <TouchableOpacity style={s.amountBtn} onPress={() => updateSupplementAmount(name, timing, 1)}>
-                        <Text style={s.stepTxt}>▲</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
-              );
-            })}
+      <View style={s.divider} /><Text style={s.blockTitle}>{t.suppTitle}</Text>
+      {allSupplements.map((name, si) => {
+        const isCustom = customSupplements.includes(name);
+        const displayName = isCustom ? name : ((t.suppList as readonly string[])[si] ?? name);
+        return (
+          <View key={name} style={s.suppCard}>
+            <View style={s.suppHeader}>
+              <Text style={s.suppName}>{displayName}</Text>
+              {isCustom && (
+                <TouchableOpacity style={s.suppRemoveBtn} onPress={() => handleRemoveCustomSupplement(name)}>
+                  <Text style={s.suppRemoveTxt}>✕ 削除</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <View style={s.suppRow}>
+              {TIMING_KEYS.map((timing, ti) => {
+                const entry = log.supplement_logs.find((s) => s.name === name && s.timing === timing);
+                return (
+                  <View key={timing} style={s.suppTiming}>
+                    <TouchableOpacity style={[s.tag, entry && s.active]} onPress={() => toggleSupplement(name, timing)}>
+                      <Text style={[s.tagTxt, entry && s.activeTxt]}>{(t.timing as readonly string[])[ti]}</Text>
+                    </TouchableOpacity>
+                    {entry && (
+                      <View style={s.amountStepper}>
+                        <TouchableOpacity style={s.amountBtn} onPress={() => updateSupplementAmount(name, timing, -1)}>
+                          <Text style={s.stepTxt}>▼</Text>
+                        </TouchableOpacity>
+                        <Text style={s.amountVal}>{entry.amount ?? 1}</Text>
+                        <TouchableOpacity style={s.amountBtn} onPress={() => updateSupplementAmount(name, timing, 1)}>
+                          <Text style={s.stepTxt}>▲</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
           </View>
-        </View>
-      ))}
+        );
+      })}
+
+      {/* カスタムサプリ追加 */}
+      <View style={s.addSuppRow}>
+        <TextInput
+          style={s.addSuppInput}
+          value={newSuppName}
+          onChangeText={setNewSuppName}
+          placeholder="例: Ashwagandha"
+          placeholderTextColor="#444"
+          onSubmitEditing={handleAddSupplement}
+          returnKeyType="done"
+        />
+        <TouchableOpacity
+          style={[s.addSuppBtn, (!newSuppName.trim() || addingSupplement) && s.addSuppBtnDisabled]}
+          onPress={handleAddSupplement}
+          disabled={!newSuppName.trim() || addingSupplement}
+        >
+          <Text style={s.addSuppTxt}>{addingSupplement ? '...' : '＋ 追加'}</Text>
+        </TouchableOpacity>
+      </View>
 
       <View style={s.divider} />
-      <Text style={s.label}>メモ</Text>
+      <Text style={s.label}>{t.memoLabel}</Text>
       <TextInput
         style={s.textarea}
         value={log.memo}
         onChangeText={(v) => update('memo', v)}
-        placeholder="体の状態・気づきなど"
+        placeholder={t.memoPlaceholder}
         placeholderTextColor="#333"
         multiline
         numberOfLines={4}
       />
 
       <TouchableOpacity style={s.saveBtn} onPress={() => onSave(log, sleepHours)} disabled={saving}>
-        <Text style={s.saveBtnTxt}>{saving ? '保存中...' : '保存する'}</Text>
+        <Text style={s.saveBtnTxt}>{saving ? t.saving : t.saveBtn}</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -374,7 +471,15 @@ const s = StyleSheet.create({
   exRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   minVal: { color: '#fff', fontWeight: 'bold', fontSize: 15, minWidth: 40, textAlign: 'center' },
   suppCard: { backgroundColor: '#1a1a1a', borderRadius: 12, padding: 14, marginBottom: 10 },
-  suppName: { color: '#ccc', fontSize: 14, fontWeight: '600', marginBottom: 10 },
+  suppHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  suppName: { color: '#ccc', fontSize: 14, fontWeight: '600' },
+  suppRemoveBtn: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#3a1a1a' },
+  suppRemoveTxt: { color: '#ef4444', fontSize: 11 },
+  addSuppRow: { flexDirection: 'row', gap: 10, marginBottom: 12, alignItems: 'center' },
+  addSuppInput: { flex: 1, backgroundColor: '#1a1a1a', color: '#fff', borderRadius: 10, padding: 12, fontSize: 14, borderWidth: 1, borderColor: '#2a2a2a' },
+  addSuppBtn: { backgroundColor: '#6366f1', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12 },
+  addSuppBtnDisabled: { backgroundColor: '#333', opacity: 0.5 },
+  addSuppTxt: { color: '#fff', fontSize: 13, fontWeight: '700' },
   suppRow: { gap: 8 },
   suppTiming: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   amountStepper: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#2a2a2a', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
